@@ -1,0 +1,14 @@
+# ExitLens generated/local files (merge into upstream .gitignore; do not replace upstream rules)
+**/.env
+**/.env.*.local
+!**/.env.example
+**/.venv/
+**/venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+*.py[cod]
+**/node_modules/
+**/dist/
+reports/exitlens/**
+!reports/exitlens/.gitkeep

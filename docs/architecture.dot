@@ -1,0 +1,85 @@
+digraph ExitLens {
+  graph [
+    rankdir=TB,
+    bgcolor="#F7F9FC",
+    pad="0.35",
+    nodesep="0.34",
+    ranksep="0.54",
+    splines=ortho,
+    compound=true,
+    fontname="Arial",
+    fontsize=24,
+    labelloc="t",
+    label="EXITLENS  |  EVIDENCE-LINKED DEPENDENCY MIGRATION INTELLIGENCE\nRepository facts + Gemma 4 recommendations + controlled verification + reusable capsule",
+    fontcolor="#172B4D"
+  ];
+  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11, margin="0.18,0.12", color="#CBD5E1", penwidth=1.2, fontcolor="#172B4D"];
+  edge [fontname="Arial", fontsize=9, color="#64748B", penwidth=1.4, arrowsize=0.7];
+
+  subgraph cluster_experience {
+    label="PRODUCT EXPERIENCE"; color="#C7D2FE"; fillcolor="#EEF2FF"; style="rounded,filled"; fontname="Arial"; fontsize=12; fontcolor="#3730A3";
+    maintainer [label="Maintainer / Developer", fillcolor="#FFFFFF", color="#A5B4FC"];
+    frontend [label="React + Vite + TypeScript\nRepository workspace • findings • migration workbench\nVerification timeline • capsule viewer/export", fillcolor="#FFFFFF", color="#818CF8"];
+    maintainer -> frontend [label="select repo / review / approve"];
+  }
+
+  subgraph cluster_api {
+    label="API & ORCHESTRATION"; color="#99F6E4"; fillcolor="#ECFDF5"; style="rounded,filled"; fontname="Arial"; fontsize=12; fontcolor="#065F46";
+    api [label="FastAPI REST API\nPydantic request/response validation", fillcolor="#FFFFFF", color="#34D399"];
+    jobs [label="Analysis job orchestrator\nqueued → scanning → recommending → verifying → complete", fillcolor="#FFFFFF", color="#34D399"];
+    store [label="Local run store\nJSON records • bounded logs • artifact metadata", fillcolor="#FFFFFF", color="#34D399"];
+    api -> jobs [label="start / inspect job"];
+    jobs -> store [label="persist state & evidence"];
+  }
+
+  subgraph cluster_engine {
+    label="DETERMINISTIC REPOSITORY ENGINE"; color="#BAE6FD"; fillcolor="#F0F9FF"; style="rounded,filled"; fontname="Arial"; fontsize=12; fontcolor="#075985";
+    repo [label="Repository workspace\nLinkWatch by default • other compatible Python repos", fillcolor="#FFFFFF", color="#38BDF8"];
+    scanner [label="Manifest & environment scanner\nrequirements • pyproject • supported lockfiles", fillcolor="#FFFFFF", color="#38BDF8"];
+    usage [label="Source usage mapper\nimports • files • line ranges • evidence IDs", fillcolor="#FFFFFF", color="#38BDF8"];
+    rules [label="Transparent risk rules\nversion/lock drift • conflicting constraints\nmetadata-backed signals • no vulnerability-first scope", fillcolor="#FFFFFF", color="#38BDF8"];
+    evidence [label="Evidence package\nOBSERVED facts separated from inferred signals", fillcolor="#DBEAFE", color="#2563EB", penwidth=1.6];
+    repo -> scanner -> usage -> rules -> evidence;
+  }
+
+  subgraph cluster_ai {
+    label="MEANINGFUL GEMMA 4 INTEGRATION"; color="#FDE68A"; fillcolor="#FFFBEB"; style="rounded,filled"; fontname="Arial"; fontsize=12; fontcolor="#92400E";
+    prompt [label="Evidence-grounded prompt builder\nlimited relevant source context • no secrets", fillcolor="#FFFFFF", color="#FBBF24"];
+    gemma [label="Gemma 4 local inference\nOllama adapter by default\nmodel ID/version recorded", fillcolor="#FEF3C7", color="#F59E0B", penwidth=1.6];
+    validate [label="Structured response validator\nJSON/schema validation • evidence-reference checks\nAI output remains a recommendation", fillcolor="#FFFFFF", color="#FBBF24"];
+    prompt -> gemma -> validate;
+  }
+
+  subgraph cluster_verify {
+    label="CONTROLLED VERIFICATION"; color="#FBCFE8"; fillcolor="#FDF2F8"; style="rounded,filled"; fontname="Arial"; fontsize=12; fontcolor="#9D174D";
+    approval [label="Human-approved test profile\nallow-listed argv • timeout • network off by default", fillcolor="#FFFFFF", color="#F472B6"];
+    baseline [label="Baseline check\noriginal dependency / original test state", fillcolor="#FFFFFF", color="#F472B6"];
+    trial [label="Replacement trial (when feasible)\ndisposable copy • validated patch • never edit source", fillcolor="#FFFFFF", color="#F472B6"];
+    compare [label="Result comparator\nexit codes • output excerpts • observed gaps\nPASSED / FAILED / SKIPPED / NOT_VERIFIED", fillcolor="#FCE7F3", color="#DB2777", penwidth=1.6];
+    approval -> baseline -> trial -> compare;
+  }
+
+  subgraph cluster_capsule {
+    label="DEPENDENCY EXIT CAPSULE"; color="#C4B5FD"; fillcolor="#F5F3FF"; style="rounded,filled"; fontname="Arial"; fontsize=12; fontcolor="#5B21B6";
+    schema [label="Capsule completeness gate\nall nine sections per flagged dependency\nmissing evidence gets explicit status", fillcolor="#FFFFFF", color="#A78BFA"];
+    json [label="capsule.json\nstructured • machine-readable", fillcolor="#FFFFFF", color="#8B5CF6"];
+    md [label="capsule.md\nreviewable • human-readable", fillcolor="#FFFFFF", color="#8B5CF6"];
+    schema -> json;
+    schema -> md;
+  }
+
+  {rank=same; frontend; api; jobs;}
+  frontend -> api [dir=both, label="REST / JSON", color="#4F46E5", penwidth=1.8];
+  jobs -> repo [label="analyze selected root", color="#0284C7", penwidth=1.8];
+  evidence -> prompt [label="ground recommendations", color="#D97706", penwidth=1.7];
+  validate -> approval [label="candidate plan + proposed patch", color="#C026D3", penwidth=1.5];
+  evidence -> approval [label="baseline evidence", style=dashed, color="#BE185D"];
+  compare -> schema [label="actual results + known gaps", color="#7C3AED", penwidth=1.8];
+  json -> store [label="persist artifacts", style=dashed, color="#6D28D9"];
+  md -> store [style=dashed, color="#6D28D9"];
+  store -> api [label="status / results / downloads", style=dashed, color="#0F766E"];
+  frontend -> schema [label="capsule viewer", style=dashed, color="#4F46E5", constraint=false];
+
+  legend [shape=note, label="PROVENANCE RULE\nOBSERVED = files/metadata actually inspected\nAI_RECOMMENDATION = Gemma 4 output, not proof\nEXECUTION_RESULT = recorded command outcome\nNOT_VERIFIED = evidence is insufficient", fillcolor="#FFFFFF", color="#94A3B8", fontsize=10];
+  {rank=sink; legend;}
+}
