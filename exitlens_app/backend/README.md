@@ -1,89 +1,115 @@
-# ExitLens Backend — FastAPI, Repository Analysis, Gemma 4 and Verification
+# ExitLens Backend — Developer & Quality Assurance Guide
 
-This README defines the backend contract for ExitLens. The backend is the single source of truth for repository findings, run state, recommendations, verification outcomes and Dependency Exit Capsule exports. The React frontend must render backend records rather than derive or invent dependency findings itself.
+ExitLens is a local-first, evidence-grounded dependency migration analysis platform. The backend is the single source of truth for repository findings, run state, recommendations, verification outcomes, and Dependency Exit Capsule exports.
 
-> **Implementation status:** This is the backend implementation specification. Endpoints and behaviors described here are expected behavior; do not report them as implemented until the routes, services and tests exist.
+---
 
-## 1. Responsibilities
+## 1. Architecture & Design Principles
 
-The backend must:
-
-1. Validate the repository input and analysis options.
-2. create an analysis run and return a stable `analysis_id`.
-3. scan supported dependency manifests and project configuration without executing manifest code.
-4. map dependencies to Python imports, files, line references and supporting evidence where static analysis permits.
-5. apply transparent, versioned maintenance-risk rules.
-6. invoke **Gemma 4** through a local inference adapter by default and validate structured output.
-7. run only human-approved, allow-listed verification profiles in a disposable worktree/copy when feasible.
-8. compare baseline/replacement outcomes and preserve skipped or unresolved checks.
-9. build a complete, versioned capsule with all nine required sections for every flagged dependency.
-10. persist run records and serve JSON/Markdown exports through the documented REST API.
-
-The backend does not build HTML, access browser state, modify the user's original repository, execute arbitrary model-generated commands, perform vulnerability-first scanning, or guarantee that an AI-suggested replacement is compatible.
-
-## 2. Intended module boundaries
+The backend is built with Python 3.12/3.13, FastAPI, and Pydantic v2. It adheres to strict architectural boundaries:
 
 ```text
 exitlens_app/backend/
-├── README.md
-├── requirements.txt
-├── .env.example
+├── requirements.txt            # Locked runtime & testing dependencies
+├── .env.example                # Safe environment variable configuration template
 ├── app/
-│   ├── main.py                     # FastAPI application, startup and CORS
-│   ├── api/v1/routes/
-│   │   ├── health.py
-│   │   ├── analyses.py
-│   │   ├── dependencies.py
-│   │   ├── recommendations.py
-│   │   ├── verification.py
-│   │   └── capsules.py
-│   ├── schemas/                    # Pydantic request/response/capsule models
-│   ├── services/                   # job lifecycle and orchestration
-│   ├── scanner/                    # manifest parsers, file walker, usages
-│   ├── risk/                       # versioned transparent rules
-│   ├── ai/                         # provider interface, Ollama adapter, prompts
-│   ├── verification/               # profiles, disposable workspace, runner
-│   ├── capsule/                    # completeness check, JSON/Markdown renderer
-│   ├── storage/                    # filesystem records and artifact access
-│   └── core/                       # settings, IDs, logging, path safety
+│   ├── main.py                 # FastAPI application, CORS, lifespan, exception handlers
+│   ├── api/v1/routes/          # REST route handlers (HTTP protocol only, no business logic)
+│   │   ├── health.py           # GET /api/v1/health
+│   │   ├── analyses.py         # POST /api/v1/analyses, GET /api/v1/analyses, GET /api/v1/analyses/{id}
+│   │   ├── dependencies.py     # GET /analyses/{id}/dependencies, GET /analyses/{id}/dependencies/{dep_id}
+│   │   ├── recommendations.py  # POST /api/v1/analyses/{id}/recommendations
+│   │   ├── verification.py     # GET /analyses/{id}/test-profiles, POST /analyses/{id}/verification
+│   │   └── capsules.py         # GET /analyses/{id}/capsule?format=json|md
+│   ├── schemas/                # Canonical Pydantic schemas (requests, responses, capsule models)
+│   ├── services/               # Orchestration and job lifecycle management
+│   ├── scanner/                # Non-executing manifest parsers, AST walker, usage mapper
+│   ├── risk/                   # Versioned, transparent maintenance-risk rules
+│   ├── ai/                     # AI provider interface, Google AI Studio provider, fake test fixture
+│   ├── verification/           # Disposable workspace runner with allow-listed test profiles
+│   ├── capsule/                # Completeness validator, JSON serializer, and Markdown renderer
+│   ├── storage/                # Atomic filesystem storage for run records and artifacts
+│   └── core/                   # Typed settings, UUIDs, ISO timestamps, logging, path safety, error types
 └── tests/
-    ├── unit/
-    ├── integration/
-    └── fixtures/
+    ├── conftest.py             # Shared pytest fixtures (temp directories, test settings, ASGI client)
+    ├── fixtures/               # Realistic repository fixtures (LinkWatch, multi-manifest, corrupted)
+    ├── unit/                   # Comprehensive unit tests (105+ tests covering all modules)
+    └── integration/            # End-to-end integration tests (LinkWatch workflow, degraded models)
 ```
 
-Keep imports acyclic. The API routes call service functions; service functions orchestrate scanner/risk/AI/verification/capsule modules. The scanner must not import API route code. The capsule renderer consumes a typed result model rather than reaching into arbitrary runtime objects.
+### Core Invariants:
+1. **Never Execute Repository Code During Scanning**: Repository manifests and Python sources are parsed strictly using non-executing parsers and Python's native `ast` module. `setup.py` is inspected via AST, never executed or imported.
+2. **Deterministic Risk Assessment**: Maintenance risks are inferred using transparent, versioned rules linked to concrete evidence IDs. Version age alone is never equated with abandonment.
+3. **Decoupled AI Layer**: Google AI Studio (hosted Gemma models) and local Ollama are supported through an abstract provider interface. Unit and integration tests run offline against deterministic test stubs (`test_fixture`). Real cloud AI output is never faked.
+4. **Disposable Workspace Verification**: Repository test code executes only when the user explicitly approves (`confirm_repository_code_execution=True`), using allow-listed server-defined argument arrays inside isolated temporary directories.
+5. **Canonical Capsule Parity**: JSON and Markdown deliverables are rendered from the same canonical Pydantic model (`DependencyExitCapsule`), validated by a 9-section completeness gate before persistence.
 
-## 3. Runtime and configuration
+---
 
-### Supported Python
+## 2. Python & Virtual Environment Setup
 
-Use Python 3.12 or 3.13 for the target repository. The event-provided LinkWatch repository is not compatible with Python 3.14. Use one Python version consistently for the backend run and document the version in analysis metadata.
+### Supported Python Versions
+- **Recommended**: Python 3.12 or Python 3.13.
+- **Incompatible**: Python 3.14 (incompatible with dependencies in the organizer-provided LinkWatch repository).
 
-### `.env.example` contract
+### Step-by-Step Setup (PowerShell / Windows)
 
-Create a non-secret `.env.example` with these names and safe local defaults. Parse settings through one typed settings module; do not read environment variables independently across modules.
+From the project root:
+
+```powershell
+# 1. Navigate to the backend directory
+cd exitlens_app\backend
+
+# 2. Create a virtual environment using Python 3.12 or 3.13
+py -3.13 -m venv .venv
+
+# 3. Activate the virtual environment
+.\.venv\Scripts\Activate.ps1
+
+# 4. Upgrade pip
+python -m pip install --upgrade pip
+
+# 5. Install dependencies
+pip install -r requirements.txt
+
+# 6. Initialize local configuration
+Copy-Item .env.example .env
+```
+
+---
+
+## 3. Environment Configuration (`.env`)
+
+Configure `exitlens_app/backend/.env` according to your deployment mode:
 
 ```dotenv
+# Application Environment
 APP_ENV=development
 APP_HOST=127.0.0.1
 APP_PORT=8000
 API_PREFIX=/api/v1
 CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 
-# A comma-separated list of permitted local repository roots. Resolve each path canonically.
+# Allowed Repository Roots (comma-separated; resolved canonically)
 ALLOWED_REPOSITORY_ROOTS=../..
 ENABLE_PUBLIC_HTTPS_GIT_CLONE=true
 
-# Local Gemma 4 inference. Record the actual tag in the capsule.
-GEMMA_PROVIDER=ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-GEMMA_MODEL=gemma4
-GEMMA_TIMEOUT_SECONDS=90
-GEMMA_MAX_RETRIES=1
+# AI Provider Selection: 'google_ai_studio', 'ollama', or 'test_fixture'
+GEMMA_PROVIDER=google_ai_studio
+
+# Google AI Studio Configuration (Hosted)
+# Leave empty for offline test mode; set for live Gemma 4 migration plans
+GOOGLE_AI_API_KEY=
+GOOGLE_AI_MODEL=gemma-4-26b-a4b-it
+GOOGLE_AI_TIMEOUT_SECONDS=90
+GOOGLE_AI_MAX_RETRIES=1
 PROMPT_VERSION=exitlens-v1
 
-# Relative paths are resolved from the backend working directory.
+# Optional Local Ollama Settings (Alternative offline inference)
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+GEMMA_MODEL=gemma4
+
+# Storage & Operational Bounds
 EXITLENS_DATA_DIR=../../reports/exitlens
 MAX_ANALYSIS_FILES=5000
 MAX_SINGLE_FILE_BYTES=500000
@@ -95,319 +121,158 @@ ALLOW_TEST_NETWORK=false
 LOG_LEVEL=INFO
 ```
 
-These values are intended defaults, not evidence that the model is installed or that an endpoint is already running. Validate model readiness through the health endpoint and expose a clear warning if unavailable. Never return private configuration values to the frontend.
+### AI Provider Setup Options
 
-### Model choice and event policy
+#### Option A: Google AI Studio (Hosted Gemma 4 Models)
+1. Obtain an API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Set `GOOGLE_AI_API_KEY=your_key_here` in `.env`.
+3. Set `GEMMA_PROVIDER=google_ai_studio` and `GOOGLE_AI_MODEL=gemma-4-26b-a4b-it` (or `gemma-4-31b-it`).
+4. *Event Policy Note:* Confirm that hosted AI usage is permitted by the event/hackathon rules before enabling for a live demo. Secrets are never exposed to API responses, logs, or exports.
 
-Default to local Gemma 4 inference using Ollama. Before the event/demo, verify the exact installed model tag, hardware capacity, inference latency and applicable model terms. References: [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4) and [Ollama Gemma 4 library](https://ollama.com/library/gemma4).
+#### Option B: Local Ollama (Offline Development)
+1. Install [Ollama](https://ollama.com/) locally.
+2. Pull the model:
+   ```powershell
+   ollama pull gemma4
+   ```
+3. Set `GEMMA_PROVIDER=ollama` in `.env`.
+4. If Ollama is offline or unreachable, the backend preserves all static scan evidence and records an honest `UNAVAILABLE` recommendation state.
 
-The event handbook prohibits paid API usage and cloud services. Therefore, do not call a hosted model endpoint in the default configuration. A hosted adapter may be added only if organizers explicitly confirm that this use is allowed. Record the **actual** model identifier, inference method, prompt version and model terms in the capsule.
+#### Option C: Deterministic Test Stubs (`test_fixture`)
+1. Set `GEMMA_PROVIDER=test_fixture` in `.env`.
+2. Fully deterministic, offline execution with zero API calls or quota consumption.
+3. Provenance is explicitly tagged `provider="test_fixture"` and `inference_method="test_fixture"`.
 
-### Local setup (PowerShell)
+---
 
-Run from the repository root:
+## 4. Running the API
+
+Start the backend with Uvicorn:
 
 ```powershell
-cd exitlens_app\backend
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-Copy-Item .env.example .env
+# From exitlens_app\backend with .venv activated:
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Use `py -3.12` if 3.12 is the chosen runtime. Confirm Ollama separately:
+### Endpoints Overview
+- **Interactive Swagger Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **ReDoc Specification**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+- **Health Check**: [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health)
+
+---
+
+## 5. Running Tests & Static Checks
+
+### Running the Test Suite
+The test suite consists of unit tests and end-to-end integration tests using `pytest` and `httpx`:
 
 ```powershell
-ollama list
-ollama run gemma4
+# Run all unit and integration tests:
+python -m pytest -v
+
+# Run only unit tests:
+python -m pytest tests/unit -v
+
+# Run only LinkWatch integration tests:
+python -m pytest tests/integration -v
 ```
 
-If the local tag differs, set `GEMMA_MODEL` to the exact installed tag. The backend must use a real provider adapter; unit tests may use a stub, but stub responses must be marked as test fixtures and never presented as real Gemma output in a live analysis.
+### Static Python Compilation Check
+Verify syntax and bytecode compilation across all backend modules:
 
-## 4. API contract
-
-All endpoints use `/api/v1`. Request and response bodies are JSON except capsule downloads. Use Pydantic models for request validation and response serialization.
-
-| Method | Endpoint | Response / behavior |
-|---|---|---|
-| `GET` | `/api/v1/health` | `200`: API readiness, Python version, configured model ID, provider availability and storage readiness. Do not leak secrets. |
-| `POST` | `/api/v1/analyses` | `202`: create job; response includes `analysis_id`, `status`, `stage`, `created_at`. |
-| `GET` | `/api/v1/analyses/{analysis_id}` | `200`: current job state, progress, summary counts, warnings, timestamps and artifact availability. |
-| `GET` | `/api/v1/analyses/{analysis_id}/dependencies` | `200`: list all scanned dependencies plus risk and usage summaries. Pagination may be added, but the MVP must not silently omit flagged dependencies. |
-| `GET` | `/api/v1/analyses/{analysis_id}/dependencies/{dependency_id}` | `200`: full dependency evidence and capsule section data for one item. |
-| `POST` | `/api/v1/analyses/{analysis_id}/recommendations` | `202`: regenerate recommendations for selected dependency IDs from stored evidence; not a new scan. |
-| `POST` | `/api/v1/analyses/{analysis_id}/verification` | `202`: queue baseline/replacement checks for selected candidates using allow-listed profiles and explicit approval. |
-| `GET` | `/api/v1/analyses/{analysis_id}/capsule?format=json` | `200`: canonical machine-readable capsule, `application/json`. |
-| `GET` | `/api/v1/analyses/{analysis_id}/capsule?format=md` | `200`: human-readable capsule, `text/markdown`. |
-
-### Create-analysis request
-
-```json
-{
-  "repository": {
-    "kind": "local_path",
-    "value": "C:/work/LinkWatch",
-    "git_ref": null
-  },
-  "options": {
-    "exclude_paths": [".git", ".venv", "venv", "node_modules", "reports", "exitlens_app"],
-    "include_tests": true,
-    "use_git_history": true,
-    "generate_recommendations": true
-  }
-}
+```powershell
+python -m compileall app tests
 ```
 
-`kind` is `local_path` or `git_url`. For a Git URL, allow only public HTTPS URLs by default, reject embedded credentials and unsafe protocols, use a disposable clone, disable submodules by default and bound clone size/time. Never run the repository's Git hooks or setup scripts. The example path is illustrative; configure actual allowed roots on the machine. The backend must canonicalize paths and enforce the allow-list before reading files.
+---
 
-### Create-analysis response
+## 6. Safety Architecture & Limitations
 
-```json
-{
-  "analysis_id": "generated-uuid",
-  "status": "queued",
-  "stage": "validating_repository",
-  "created_at": "UTC ISO-8601 timestamp"
-}
-```
+ExitLens enforces defense-in-depth safety boundaries:
 
-### Analysis status model
+| Safety Domain | Protection Mechanism |
+|---|---|
+| **Repository Scanning** | Manifests and Python sources are parsed using non-executing AST visitors. `setup.py` code is never executed. Recursive includes (`-r`) have a recursion depth limit (10) preventing infinite include loops. |
+| **Path Traversal Defenses** | All input paths are resolved canonically. Paths outside `ALLOWED_REPOSITORY_ROOTS`, null bytes, and traversal sequences (`..`) are rejected with HTTP 422. Symlink escapes outside allowed roots are blocked. |
+| **Test Verification Approval** | Test execution requires explicit approval (`confirm_repository_code_execution=True`). Unconfirmed requests return HTTP 422 `CONFIRMATION_REQUIRED`. |
+| **Server-Defined Profiles** | Clients cannot specify arbitrary shell commands. Only allow-listed, server-defined profiles (`pytest-default`, `pytest-verbose`, `unittest-discover`) with fixed argument arrays may be executed. |
+| **Disposable Workspaces** | Test verification is never run on the user's working tree. The repository is copied to a disposable temporary directory and removed after execution. |
+| **Network Isolation** | Subprocess environment enforces `PIP_NO_INDEX=1`, `PIP_OFFLINE=1`, and proxy neutralization (`HTTP_PROXY=http://127.0.0.1:0`). |
+| **Output Redaction & Limits** | Captured output is bounded (default 16 KB) and scrubbed for API keys, bearer tokens, passwords, and private URLs before persistence. |
 
-Use these run statuses consistently:
+### Critical Sandbox Limitation Disclosure
+> [!WARNING]
+> A local Python subprocess in a temporary directory provides process isolation, **not** a secure operating system sandbox. It does not prevent low-level OS kernel exploits or malicious code from accessing user files. For untrusted repositories, execute ExitLens inside a container (Docker/Podman) or microVM (gVisor/Firecracker).
 
-- `queued`
-- `validating_repository`
-- `scanning`
-- `mapping_usage`
-- `assessing_risk`
-- `generating_recommendations`
-- `ready_for_verification`
-- `verifying`
-- `completed`
-- `completed_with_warnings`
-- `failed`
+---
 
-Progress must reflect work the backend has actually reached. Do not animate fake progress. If Gemma fails, static scanning may still finish and the run should become `completed_with_warnings` with recommendation status unavailable. If there are no flagged candidates, return the real empty state and scanning-coverage notes; do not generate a fictitious candidate.
+## 7. Known Unsupported Manifest Patterns
 
-### Recommendations request
+The scanner handles standard Python packaging practices but safely degrades with a logged coverage warning when encountering unsupported constructs:
 
-```json
-{
-  "dependency_ids": ["dependency-id-1", "dependency-id-2"],
-  "force_regenerate": false
-}
-```
+1. **Dynamic `setup.py` / `setup.cfg`**:
+   - Manifests that execute code at parse time (e.g., reading requirements from remote APIs or executing shell commands) are parsed via static AST only. Dynamic expressions produce a coverage warning.
+2. **Unsupported pip CLI Options**:
+   - Directives such as `-c constraints.txt`, `-i https://custom.pypi.org/simple`, `--extra-index-url`, and `-e .` (editable installs) are recognized and skipped with a warning, rather than crashing the parser.
+3. **Circular Recursive Includes**:
+   - `requirements.txt` includes referencing each other (e.g., `a.txt -> b.txt -> a.txt`) are bounded by a maximum recursion depth of 10. Once the depth is exceeded, circular includes are aborted with a warning.
+4. **Unsupported Lockfile Formats**:
+   - Poetry lock (`poetry.lock`), uv lock (`uv.lock`), and Pipenv (`Pipfile.lock`) are parsed statically. Proprietary or binary lockfiles trigger an unsupported format warning.
 
-The initial pipeline should request recommendations for **all flagged dependencies** when `generate_recommendations=true`. The endpoint above permits a user to retry or regenerate selected recommendations after a provider error. Request size and selected IDs must be validated against the saved scan result.
+---
 
-### Verification request
+## 8. Release Verification Checklist
 
-```json
-{
-  "dependency_ids": ["dependency-id-1"],
-  "baseline_profile_id": "python-pytest-or-unittest-detected",
-  "replacement_profile_id": "same-profile-in-disposable-copy",
-  "confirm_repository_code_execution": true,
-  "allow_network": false,
-  "timeout_seconds": 90
-}
-```
-
-Profile IDs in the example are descriptive; the actual server returns profile IDs it detected/allow-listed. The backend must reject unknown profiles and timeouts above the configured maximum. Do **not** accept `shell_command` supplied by the model or browser. Build argument arrays from trusted profiles. A model-generated patch may be tried only after review, patch-path validation and explicit approval; it must be applied only in a disposable copy.
-
-### Standard error response
-
-```json
-{
-  "error": {
-    "code": "MODEL_UNAVAILABLE",
-    "message": "Gemma 4 is not reachable from the configured local provider.",
-    "details": {"stage": "generating_recommendations"},
-    "request_id": "generated-id"
-  }
-}
-```
-
-Use HTTP 404 for unknown run/dependency IDs, 422 for invalid input, 409 for incompatible run state, 503 for unavailable required service operations, and 500 only for unexpected errors. Do not send stack traces or secrets to the UI; log a request ID instead.
-
-## 5. Scanner and evidence model
-
-### Supported files
-
-Implement non-executing parsing for `requirements.txt` variants, static `[project].dependencies` and supported Poetry/uv sections in `pyproject.toml`, `poetry.lock`, `uv.lock`, `Pipfile`/`Pipfile.lock`, and static dependency metadata in `setup.cfg`. `setup.py` must not be imported/executed; only limited AST/static inspection is allowed. Unsupported includes, dynamic dependency declarations and unknown formats generate a coverage warning.
-
-Walk Python source/test files with bounded file count and file-size limits. Exclude `.git`, virtual environments, `node_modules`, generated reports, caches and the ExitLens app directory when the target root is the submission fork. Keep exclusions configurable so a different repository can be analyzed without modifying source code. Do not follow symlinks outside the approved repository root.
-
-### Evidence record contract
-
-Give each piece of observed evidence a stable per-run ID and type, for example:
-
-```json
-{
-  "evidence_id": "ev-000123",
-  "kind": "manifest_declaration",
-  "provenance": "OBSERVED",
-  "path": "requirements.txt",
-  "line_start": 12,
-  "line_end": 12,
-  "excerpt": "bounded sanitized excerpt",
-  "sha256": "hash-of-source-file-or-evidence",
-  "observed_at_utc": "timestamp"
-}
-```
-
-This is a schema example; values must be generated at runtime. Keep paths repository-relative. Store small sanitized excerpts, not full sensitive files. Every rule/AI claim should point to evidence IDs when applicable. Validate model-provided evidence IDs against the saved evidence package and discard or flag invented references.
-
-### Initial transparent risk rules
-
-Use stable IDs and tests for rules such as:
-
-- `UNPINNED_OR_WIDE_CONSTRAINT`
-- `MANIFEST_LOCK_DRIFT`
-- `CONFLICTING_DECLARATIONS`
-- `LOCKFILE_MISSING_WHERE_EXPECTED`
-- `DECLARED_NO_STATIC_USAGE_FOUND` (review-only; not proof of unused code)
-- `IMPORT_NOT_MAPPED_TO_DISTRIBUTION`
-- `RUNTIME_CONSTRAINT_MISMATCH`
-- `DEPRECATED_OR_STALE_METADATA` (only if a trusted/approved metadata source actually supplies the fact)
-
-Each rule includes severity, signal, explanation, evidence IDs and limitations. Do not infer unmaintained status from a pinned/old version alone. Unknown metadata is `not_assessed`, not a negative finding. Vulnerability scanning is not part of the MVP scoring scope.
-
-## 6. Gemma 4 adapter and prompt contract
-
-Implement a provider interface, e.g. `generate_migration_plan(evidence_bundle, dependency_record) -> MigrationRecommendation`. The default adapter talks to the local Ollama endpoint using the configured model tag. Keep provider code separate from business logic so unit tests can inject a deterministic stub.
-
-The model receives:
-
-- The dependency declaration and available resolved metadata.
-- Its risk indicators and linked evidence IDs.
-- Relevant source/import excerpts and test/config clues only.
-- The supported runtime and repository test-profile information.
-- The required output schema and instructions to report uncertainty.
-
-The model must return structured fields for candidate status, replacement distribution/specifier if known, rationale, source/usage-aware migration steps, API differences, suggested tests, compatibility concerns and optional patch proposal. Parse into Pydantic models; reject malformed types, unsafe patch paths, unknown evidence IDs and unsupported status values. One schema-repair retry is allowed. Never let the AI choose an arbitrary command for execution.
-
-**Meaningful-AI proof:** save provider/model identity, exact configured tag, prompt version, timestamp, validated recommendation, and evidence references. A fallback/stub used in automated tests must be tagged `test_fixture` and cannot be represented as real Gemma in the UI or submitted evidence.
-
-## 7. Verification service
-
-### Baseline versus replacement
-
-- **Baseline:** run a detected or user-approved test profile against the original dependency state in an isolated copy of the target.
-- **Replacement:** only attempt if a candidate has enough information and there is a validated, reviewed migration patch/change set that can be applied to another disposable copy. Update or install the proposed dependency only under the approved environment policy.
-- **Comparison:** run comparable profiles where feasible, then compare status, exit code and relevant output. Differences are signals, not an automatic proof of cause.
-
-If the baseline is already failing, preserve its failure and compare carefully; do not claim the replacement introduced it. If the replacement package is not installed/cached and network is disabled, record `SKIPPED` and the exact reason. Do not say the replacement was tested merely because the model proposed tests.
-
-### Safety controls
-
-- Require explicit user confirmation before running repository test code.
-- Use disposable copies; never run replacement experiments on the original working tree.
-- Allow only server-defined test profiles and argv arrays.
-- Keep network off by default and do not auto-install packages from the internet.
-- Apply maximum timeout, file/output limits, a restricted environment variable allow-list and no inherited secrets.
-- Validate every patch path after normalization; reject path traversal, absolute paths and symlink escapes.
-- Bound captured output (default 16 KB per stream) and redact obvious tokens.
-- State clearly that a local subprocess and temporary directory are **not** a complete sandbox. For truly untrusted code, use an OS/container isolation layer before execution.
-
-## 8. Dependency Exit Capsule service
-
-Use a single canonical Pydantic schema to render JSON and Markdown. Do not create separate logic that can cause the two exports to drift.
-
-For **every flagged dependency**, include all nine sections:
-
-1. `dependency_details`
-2. `risk_indicators`
-3. `usage_locations`
-4. `proposed_replacement`
-5. `migration_steps`
-6. `suggested_tests`
-7. `executed_test_results`
-8. `compatibility_gaps`
-9. `open_concerns_limitations`
-
-When a field has no supported content, retain the field with an empty list/null plus an explicit status/reason. Example: a dependency with no viable candidate still has `proposed_replacement.status="no_candidate_identified"` and an explanation. A baseline never attempted has an explicit `NOT_RUN` result (or a documented per-section status if no test profile exists).
-
-Before export, validate:
-
-- Each flagged dependency ID is present exactly once.
-- Each of the nine sections is present for every flagged dependency.
-- Each evidence ID exists in the run's evidence index.
-- Every `EXECUTION_RESULT` has recorded status and a command/profile identifier.
-- AI suggestions are labelled `AI_RECOMMENDATION`, not `OBSERVED` or `EXECUTION_RESULT`.
-- Markdown and JSON are rendered from the same canonical object.
-- Repository source/revision, model provenance, scan scope and generation time are recorded.
-
-### Extra USP features (prioritized)
-
-**P0 — implement if at all possible:**
-
-- **Evidence provenance ledger:** each item is tagged Observed, Inferred, AI Recommendation or Execution Result and links back to paths/line ranges/run IDs.
-- **Capsule completeness gate:** fail export validation when a required section is missing; unavailable evidence gets a reason, not an invented result.
-- **All-candidate coverage:** ensure every rule-flagged dependency gets a recommendation attempt and capsule record, including error/no-candidate outcomes.
-
-**P1 — add after the core workflow:**
-
-- **Counterfactual Migration Trial:** human-review a proposed patch, apply it only to a disposable copy, and compare baseline vs replacement checks.
-- **Reproducibility fingerprint:** record Git commit when available, hashes of parsed manifests, runtime details, rule-set version, prompt version and command profile IDs.
-- **Coverage/uncertainty summary:** report what fraction of manifests were parsed, dependencies mapped and checks actually run; this is coverage, not a quality score.
-
-## 9. Persistence, retention and logging
-
-Use filesystem-backed run storage for the MVP. Suggested layout:
+Use this checklist to prove that all API routes work together end-to-end:
 
 ```text
-reports/exitlens/runs/<analysis_id>/
-├── analysis.json
-├── evidence.json
-├── capsule.json
-├── capsule.md
-└── verification/
-    └── <verification_id>.json
+[x] 1. GET  /api/v1/health
+       - Returns HTTP 200 with API status, Python runtime compatibility, storage readiness, and AI provider status.
+       - No secrets or API credentials exposed in response.
+
+[x] 2. POST /api/v1/analyses
+       - Accepts RepositoryInput and AnalysisOptions.
+       - Returns HTTP 202 with analysis_id, status="queued", and stage="validating_repository".
+
+[x] 3. GET  /api/v1/analyses/{analysis_id}
+       - Polls status and real progress percentage (0% to 100%).
+       - Reaches completed or completed_with_warnings.
+       - Artifact availability flags reflect persisted JSON and Markdown deliverables.
+
+[x] 4. GET  /api/v1/analyses/{analysis_id}/dependencies
+       - Returns all flagged dependencies with risk indicators, usage locations, and proposed replacements.
+       - No duplicate dependency IDs (each flagged dependency appears exactly once).
+
+[x] 5. GET  /api/v1/analyses/{analysis_id}/dependencies/{dependency_id}
+       - Returns full 9-section details for a single selected dependency ID.
+       - Returns HTTP 404 for unknown dependency IDs.
+
+[x] 6. POST /api/v1/analyses/{analysis_id}/recommendations
+       - Regenerates AI migration recommendations for selected dependency IDs from stored evidence.
+       - Does not re-scan the repository.
+       - Returns HTTP 202 with updated recommendation records.
+
+[x] 7. GET  /api/v1/analyses/{analysis_id}/test-profiles
+       - Statically inspects the repository and returns allow-listed test profiles (pytest, unittest).
+       - Tags detected profiles with is_detected=True and detection evidence.
+
+[x] 8. POST /api/v1/analyses/{analysis_id}/verification
+       - Rejects unconfirmed requests (confirm_repository_code_execution=False) with HTTP 422.
+       - Rejects unauthorized profiles with HTTP 422 UNAUTHORIZED_TEST_PROFILE.
+       - Executes approved baseline verification in a disposable copy and records results.
+       - Safely marks replacement trials SKIPPED when no validated patch is available.
+
+[x] 9. GET  /api/v1/analyses/{analysis_id}/verification/{verification_id}
+       - Returns stored verification session record with baseline and replacement results.
+
+[x] 10. GET /api/v1/analyses/{analysis_id}/capsule?format=json
+       - Serves canonical Dependency Exit Capsule with application/json header.
+       - Passes 9-section capsule completeness validation with 0 errors.
+
+[x] 11. GET /api/v1/analyses/{analysis_id}/capsule?format=md
+       - Serves human-readable Markdown deliverable with text/markdown header.
+       - Contains Executive Summary, Flagged Dependencies, Provenance Legend, and Known Limitations.
+
+[x] 12. GET /api/v1/analyses/{analysis_id}/capsule?format=invalid
+       - Rejects unsupported format with HTTP 422 INVALID_EXPORT_FORMAT.
 ```
-
-Write JSON atomically (temporary file then rename), validate `analysis_id` as a generated UUID, and prevent path traversal. Do not commit this directory. Persist stage changes and warnings so an API restart does not turn an incomplete run into a false success. If a run cannot be resumed after restart, clearly mark it failed/interrupted.
-
-Logs should use request/analysis IDs, avoid full source code, avoid all environment dumps, and redact tokens/secrets. The capsule may be public once exported; sanitize file excerpts and do not include secrets, private URLs with credentials or full environment values.
-
-## 10. Tests and definition of done
-
-### Unit tests
-
-- Manifest parse fixtures and unsupported/dynamic construct warnings.
-- Constraint/lock mismatch and conflicting-declaration rules.
-- Import-to-distribution mapping uncertainties.
-- Stable relative file/line locations and exclusion behavior.
-- Path allow-list, URL protocol/credential validation, and traversal defenses.
-- Gemma response JSON parsing, malformed output, unknown evidence IDs, timeout and unavailable provider.
-- All nine capsule fields required on each flagged dependency.
-- Export parity: JSON round-trip and Markdown representation correspond to the same canonical schema.
-- Runner timeout, nonzero exit, truncated output, `SKIPPED` and `NOT_RUN` statuses.
-
-### Integration tests
-
-- Run a fresh scan against LinkWatch.
-- Run with Gemma enabled and record the actual model identity.
-- Simulate model unavailability and confirm scanner facts are retained with a warning.
-- Confirm every flagged dependency receives a record and recommendation attempt/status.
-- Execute at least one safe baseline check if feasible.
-- Exercise replacement verification only when a reviewed patch and environment are available; otherwise assert the skipped reason is serialized.
-- Download both capsule formats and verify required sections.
-
-### Backend release gate
-
-Do not call the backend done until health, scan creation, status polling, dependency retrieval, recommendations, verification, and both capsule downloads work end to end. “Endpoint exists” is not equivalent to “workflow works.”
-
-## 11. References
-
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [Pydantic](https://docs.pydantic.dev/)
-- [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4)
-- [Ollama Gemma 4 library](https://ollama.com/library/gemma4)
-- [Organizer target repository](https://github.com/rishrek/LinkWatch)
-- [Renovate](https://docs.renovatebot.com/)
-- [Dependabot](https://docs.github.com/en/code-security/dependabot)
-
-The backend must stay local-first, evidence-driven and compatible with the common API/capsule contract described in the root `README.md`.
