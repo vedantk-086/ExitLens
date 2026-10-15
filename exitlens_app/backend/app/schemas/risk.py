@@ -32,6 +32,7 @@ class RiskIndicator(BaseModel):
 
     severity: RiskSeverity = Field(..., description="Severity classification")
     title: str = Field(..., description="Short descriptive title of the finding")
+    signal: Optional[str] = Field(default=None, description="Alias for title or rule finding signal")
     explanation: str = Field(..., description="Detailed, explainable reasoning for the risk indicator")
     signal_source: str = Field(
         ...,
@@ -40,6 +41,10 @@ class RiskIndicator(BaseModel):
     evidence_refs: List[str] = Field(
         default_factory=list,
         description="List of evidence_ids supporting this finding",
+    )
+    evidence_ids: List[str] = Field(
+        default_factory=list,
+        description="Alias for evidence_refs",
     )
     confidence: Optional[str] = Field(
         default=None,

@@ -393,22 +393,90 @@ class OrchestrationService:
                         )
                     )
 
-            capsule_dep = CapsuleDependencyRecord(
-                dependency_id=dep_id,
-                dependency_details=dep,
-                risk_indicators=dep_risks,
-                usage_locations=dep_usages,
-                proposed_replacement=rec.proposed_replacement if rec else ProposedReplacement(
-                    status=CandidateStatus.NO_CANDIDATE_IDENTIFIED,
+            dep_details = DependencyDetails(
+                distribution_name=dep.distribution_name,
+                name=dep.distribution_name,
+                manifest_path=dep.manifest_path,
+                declared_specifier=dep.declared_specifier or "",
+                declared_version=dep.declared_specifier or "",
+                resolved_version=dep.resolved_version,
+                package_manager=dep.package_manager,
+                dependency_type=dep.dependency_type.value if hasattr(dep.dependency_type, "value") else str(dep.dependency_type),
+                runtime_markers=dep.runtime_markers,
+                metadata_availability=dep.metadata_availability,
+                summary=f"Python dependency declared in {dep.manifest_path}",
+            )
+
+            # Enrich risk indicators
+            enriched_risks = [
+                r.model_copy(update={"signal": r.title, "evidence_ids": list(r.evidence_refs)})
+                for r in dep_risks
+            ]
+
+            # Enrich usage locations
+            enriched_usages = [
+                u.model_copy(update={
+                    "file_path": u.path,
+                    "import_name": u.import_statement or u.symbol or "",
+                    "excerpt": u.pattern or u.import_statement or "",
+                })
+                for u in dep_usages
+            ]
+
+            # Enrich proposed replacement
+            if rec and rec.proposed_replacement:
+                rep = rec.proposed_replacement
+                enriched_replacement = rep.model_copy(update={
+                    "candidate_distribution": rep.candidate_distribution or rep.distribution_name,
+                    "candidate_specifier": rep.candidate_specifier or rep.specifier,
+                })
+            else:
+                enriched_replacement = ProposedReplacement(
+                    status=CandidateStatus.NO_CANDIDATE_IDENTIFIED.value,
                     distribution_name=None,
+                    candidate_distribution=None,
                     specifier=None,
+                    candidate_specifier=None,
                     rationale="No migration candidate requested or identified.",
                     candidate_validation_status="NOT_VERIFIED",
-                ),
-                migration_steps=rec.migration_steps if rec else [],
-                suggested_tests=rec.suggested_tests if rec else [],
+                )
+
+            # Enrich migration steps
+            enriched_steps = []
+            if rec and rec.migration_steps:
+                for s in rec.migration_steps:
+                    code_ex = s.code_example or (f"# Action on {s.target_file}\n# {s.description}" if s.target_file else None)
+                    enriched_steps.append(s.model_copy(update={"code_example": code_ex}))
+
+            # Enrich suggested tests
+            enriched_tests = []
+            if rec and rec.suggested_tests:
+                for t in rec.suggested_tests:
+                    enriched_tests.append(t.model_copy(update={
+                        "description": t.description or t.objective,
+                        "test_type": t.test_type or t.suggested_profile,
+                        "code_example": t.code_example or f"# Expected signal:\n# {t.expected_signal}",
+                    }))
+
+            # Ensure compatibility gaps have severity
+            enriched_gaps = []
+            for g in comp_gaps:
+                enriched_gaps.append(g.model_copy(update={
+                    "severity": g.severity or "medium",
+                    "evidence_ids": list(g.evidence_refs),
+                }))
+
+            capsule_dep = CapsuleDependencyRecord(
+                dependency_id=dep_id,
+                name=dep.distribution_name,
+                dependency_details=dep_details,
+                risk_indicators=enriched_risks,
+                usage_locations=enriched_usages,
+                proposed_replacement=enriched_replacement,
+                migration_steps=enriched_steps,
+                suggested_tests=enriched_tests,
                 executed_test_results=[],  # Populated during verification phase
-                compatibility_gaps=comp_gaps,
+                compatibility_gaps=enriched_gaps,
                 open_concerns_limitations=rec.open_concerns_limitations if rec else [],
                 evidence_refs=ev_refs,
             )

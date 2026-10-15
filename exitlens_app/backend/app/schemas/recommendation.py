@@ -22,6 +22,7 @@ class MigrationStep(BaseModel):
     action: str = Field(..., description="Short action summary (e.g. 'Replace import', 'Update requirements')")
     description: str = Field(..., description="Detailed instructions for the developer")
     target_file: Optional[str] = Field(default=None, description="Repository-relative target file path")
+    code_example: Optional[str] = Field(default=None, description="Code example or snippet for the step")
     human_review_required: bool = Field(default=True, description="True if step requires human validation")
 
 
@@ -31,10 +32,13 @@ class SuggestedTest(BaseModel):
 
     test_id: str = Field(..., description="Unique suggestion identifier")
     objective: str = Field(..., description="Goal of the test check")
+    description: Optional[str] = Field(default=None, description="Short summary of the test check")
     relation_to_usage: str = Field(..., description="How this check links to discovered repository usages")
     suggested_profile: str = Field(..., description="Test profile identifier (e.g. pytest-unit)")
+    test_type: Optional[str] = Field(default=None, description="Test framework or profile type")
     preconditions: List[str] = Field(default_factory=list, description="Requirements prior to execution")
     expected_signal: str = Field(..., description="Expected outcome indicating compatibility")
+    code_example: Optional[str] = Field(default=None, description="Expected signal or test code snippet")
 
 
 class ProposedReplacement(BaseModel):
@@ -49,11 +53,20 @@ class ProposedReplacement(BaseModel):
         default=None,
         description="Suggested replacement PyPI package name, or None if none identified",
     )
+    candidate_distribution: Optional[str] = Field(
+        default=None,
+        description="Alias for distribution_name",
+    )
     specifier: Optional[str] = Field(
         default=None,
         description="Recommended version constraint/specifier (e.g. '>=2.31.0')",
     )
+    candidate_specifier: Optional[str] = Field(
+        default=None,
+        description="Alias for specifier",
+    )
     rationale: str = Field(..., description="Evidence-backed rationale for the recommendation")
+    limitations: Optional[str] = Field(default=None, description="Candidate limitations or architectural notes")
     candidate_validation_status: str = Field(
         default="NOT_VERIFIED",
         description="Validation outcome: 'NOT_VERIFIED', 'VERIFIED_PASSING', 'VERIFIED_FAILING', etc.",

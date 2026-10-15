@@ -29,7 +29,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { StatusBadge, StatusVariant } from '../components/ui/StatusBadge';
 import { useAnalysisContext } from '../context/useAnalysisContext';
 import { useDependencyList, useDependencyDetail } from '../hooks/useDependencies';
-import { postVerification } from '../api/analyses';
+import { postVerification, getTestProfiles } from '../api/analyses';
 import { ApiClientError } from '../api/client';
 import {
   VerificationRequest,
@@ -37,6 +37,7 @@ import {
   VerificationExecutionRecord,
   VerificationStatus,
   RiskSeverity,
+  TestProfile,
 } from '../types/api';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -435,7 +436,32 @@ export function VerificationPage() {
   const [timeoutSeconds, setTimeoutSeconds] = useState<number>(DEFAULT_TIMEOUT_SECONDS);
   const [allowNetwork, setAllowNetwork] = useState<boolean>(false);
 
-  // Derive server-supplied profile IDs if present in existing detail, otherwise use contract standard token
+  const [availableProfiles, setAvailableProfiles] = useState<TestProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('pytest-default');
+
+  useEffect(() => {
+    if (!analysisId) return;
+    let isMounted = true;
+    getTestProfiles(analysisId)
+      .then((profiles) => {
+        if (!isMounted) return;
+        setAvailableProfiles(profiles);
+        const detected = profiles.find((p) => p.is_detected);
+        if (detected) {
+          setSelectedProfileId(detected.profile_id);
+        } else if (profiles.length > 0) {
+          setSelectedProfileId(profiles[0].profile_id);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not fetch test profiles:', err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [analysisId]);
+
+  // Derive server-supplied profile IDs if present in existing detail, otherwise use selected or contract standard token
   const serverBaselineProfile = useMemo(() => {
     if (detailState.status === 'loaded' && detailState.detail.executed_test_results) {
       const match = detailState.detail.executed_test_results.find((r) => r.is_baseline && r.profile_id);
@@ -452,8 +478,8 @@ export function VerificationPage() {
     return null;
   }, [detailState]);
 
-  const baselineProfileId = serverBaselineProfile || 'server-detected-profile-id';
-  const replacementProfileId = serverReplacementProfile || 'server-detected-profile-id';
+  const baselineProfileId = availableProfiles.length > 0 ? selectedProfileId : (serverBaselineProfile || 'server-detected-profile-id');
+  const replacementProfileId = availableProfiles.length > 0 ? selectedProfileId : (serverReplacementProfile || 'server-detected-profile-id');
 
   // Human approval modal state
   const [isApprovalOpen, setIsApprovalOpen] = useState<boolean>(false);
@@ -817,25 +843,34 @@ export function VerificationPage() {
                 <Lock className="w-3.5 h-3.5 text-[#526176]" />
                 Permitted Test Profiles
               </label>
-              <div className="p-2.5 bg-[#FAFBFC] border border-[#E1E6EE] rounded-md text-xs flex flex-col gap-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-[#718096]">Baseline Profile:</span>
-                  <span className="font-mono text-[#172033] font-medium">{baselineProfileId}</span>
+              <div className="p-2.5 bg-[#FAFBFC] border border-[#E1E6EE] rounded-md text-xs flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[#718096]">Profile:</span>
+                  {availableProfiles.length > 0 ? (
+                    <select
+                      id="profile-select"
+                      value={selectedProfileId}
+                      onChange={(e) => setSelectedProfileId(e.target.value)}
+                      className="font-mono text-xs text-[#172033] bg-white border border-[#E1E6EE] rounded px-2 py-1 flex-1 max-w-[200px]"
+                    >
+                      {availableProfiles.map((p) => (
+                        <option key={p.profile_id} value={p.profile_id}>
+                          {p.display_name} {p.is_detected ? '★ (Detected)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="font-mono text-[#172033] font-medium">{baselineProfileId}</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[#718096]">Replacement Profile:</span>
-                  <span className="font-mono text-[#172033] font-medium">{replacementProfileId}</span>
+                  <span className="text-[#718096]">Profile ID:</span>
+                  <span className="font-mono text-[11px] text-[#526176]">{baselineProfileId}</span>
                 </div>
               </div>
-              {!serverBaselineProfile && !serverReplacementProfile ? (
-                <span className="text-[11px] text-[#925C08] leading-relaxed bg-[#FFF5DE] p-1.5 rounded">
-                  Profile discovery limitation: Backend scan did not expose specific allow-listed profile IDs for this candidate. Requesting server auto-detection (<code>server-detected-profile-id</code>).
-                </span>
-              ) : (
-                <span className="text-[11px] text-[#718096] leading-relaxed">
-                  Using server-detected test profiles. Arbitrary shell commands are rejected by design.
-                </span>
-              )}
+              <span className="text-[11px] text-[#718096] leading-relaxed">
+                Allow-listed test profiles detected from repository. Arbitrary shell commands are rejected by design.
+              </span>
             </div>
 
             {/* Timeout Configuration */}

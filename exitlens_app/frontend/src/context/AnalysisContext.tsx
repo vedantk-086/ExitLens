@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getHealth } from '../api/health';
 import { createAnalysis, getAnalysis } from '../api/analyses';
 import {
@@ -14,6 +14,15 @@ const STORAGE_KEY_RECENT_RUNS = 'exitlens_recent_runs_v1';
 const STORAGE_KEY_ACTIVE_ID = 'exitlens_active_analysis_id';
 
 export function AnalysisProvider({ children }: { children: React.ReactNode }) {
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Health state
   const [healthData, setHealthData] = useState<HealthResponse | null>(null);
   const [isHealthLoading, setIsHealthLoading] = useState(true);
@@ -48,12 +57,15 @@ export function AnalysisProvider({ children }: { children: React.ReactNode }) {
 
   // Fetch health
   const checkHealth = useCallback(async () => {
+    if (!isMountedRef.current) return;
     setIsHealthLoading(true);
     try {
       const res = await getHealth();
+      if (!isMountedRef.current) return;
       setHealthData(res);
       setHealthError(null);
     } catch (err: unknown) {
+      if (!isMountedRef.current) return;
       setHealthData(null);
       if (err instanceof ApiClientError) {
         setHealthError(err.message);
@@ -61,8 +73,10 @@ export function AnalysisProvider({ children }: { children: React.ReactNode }) {
         setHealthError('Unable to reach backend health endpoint.');
       }
     } finally {
-      setIsHealthLoading(false);
-      setLastHealthCheck(new Date());
+      if (isMountedRef.current) {
+        setIsHealthLoading(false);
+        setLastHealthCheck(new Date());
+      }
     }
   }, []);
 
@@ -76,11 +90,16 @@ export function AnalysisProvider({ children }: { children: React.ReactNode }) {
   // Derived health indicators
   const isBackendAvailable = Boolean(
     healthData &&
-      (healthData.status === 'ok' || healthData.status === 'healthy' || healthData.api_ready === true)
+      (healthData.status === 'ok' ||
+        healthData.status === 'healthy' ||
+        healthData.status === 'degraded' ||
+        healthData.api_ready === true ||
+        healthData.api?.status === 'ready')
   );
 
   const isModelAvailable = Boolean(
-    isBackendAvailable && healthData?.model?.ready === true
+    isBackendAvailable &&
+      (healthData?.model?.ready === true || healthData?.ai?.available === true)
   );
 
   // Poll active analysis

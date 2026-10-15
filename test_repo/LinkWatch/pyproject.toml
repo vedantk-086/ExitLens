@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linkwatch"
+version = "0.2.1"
+description = "Continuous link health verification and dead link monitor."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.20.0",
+    "beautifulsoup4>=4.9.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

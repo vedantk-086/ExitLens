@@ -69,25 +69,32 @@ async def trigger_verification(
     analysis = analysis_service.get_analysis(analysis_id)
     repo_path = Path(analysis.repository.value)
 
-    if not repo_path.is_dir():
-        raise NotFoundError(f"Repository path '{analysis.repository.value}' is not an accessible directory.")
-
     if not request.confirm_repository_code_execution:
         raise ConfirmationRequiredError(
             "Explicit confirmation (confirm_repository_code_execution=True) is required "
             "before executing repository test code in disposable workspaces."
         )
 
-    # Load candidate recommendations if capsule exists
-    recommendations = []
-    try:
-        capsule = analysis_service.get_capsule(analysis_id)
-        # Gather matching dependency records
-        for dep in capsule.dependencies:
-            if dep.dependency_id in request.dependency_ids:
-                pass
-    except Exception:
-        pass
+    if not repo_path.is_dir():
+        is_git = (
+            hasattr(analysis.repository, "kind")
+            and (analysis.repository.kind == "git_url" or getattr(analysis.repository.kind, "value", "") == "git_url")
+        ) or str(analysis.repository.value).startswith(("http://", "https://"))
+
+        if is_git:
+            from app.scanner.git_cloner import safe_disposable_clone
+            with safe_disposable_clone(
+                git_url=str(analysis.repository.value),
+                git_ref=analysis.repository.git_ref,
+                enable_public_clone=True,
+            ) as (cloned_path, _):
+                return await verif_service.execute_verification_session(
+                    analysis_id=analysis_id,
+                    request=request,
+                    repository_path=cloned_path,
+                )
+
+        raise NotFoundError(f"Repository path '{analysis.repository.value}' is not an accessible directory.")
 
     record = await verif_service.execute_verification_session(
         analysis_id=analysis_id,

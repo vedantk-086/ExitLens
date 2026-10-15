@@ -282,6 +282,41 @@ class VerificationService:
         )
         self.analysis_service.save_verification(record)
 
+        # Update capsule deliverable with executed test results
+        try:
+            capsule = self.analysis_service.get_capsule(analysis_id)
+            updated_deps = []
+            for dep in capsule.dependencies:
+                if dep.dependency_id in request.dependency_ids:
+                    existing_runs = list(dep.executed_test_results or [])
+                    for res in all_results:
+                        existing_runs.append(res)
+                    dep = dep.model_copy(update={"executed_test_results": existing_runs})
+                updated_deps.append(dep)
+
+            passed = sum(1 for r in all_results if r.status == TestStatus.PASSED)
+            failed = sum(1 for r in all_results if r.status in (TestStatus.FAILED, TestStatus.ERROR))
+            skipped = sum(1 for r in all_results if r.status in (TestStatus.SKIPPED, TestStatus.NOT_RUN, TestStatus.TIMED_OUT))
+            base_count = sum(1 for r in all_results if r.run_kind == "baseline")
+            repl_count = sum(1 for r in all_results if r.run_kind == "replacement")
+
+            updated_summary = capsule.summary.model_copy(update={
+                "baseline_checks": capsule.summary.baseline_checks + base_count,
+                "replacement_checks": capsule.summary.replacement_checks + repl_count,
+                "checks_passed": capsule.summary.checks_passed + passed,
+                "checks_failed": capsule.summary.checks_failed + failed,
+                "checks_skipped_or_unverified": capsule.summary.checks_skipped_or_unverified + skipped,
+            })
+
+            capsule = capsule.model_copy(update={
+                "dependencies": updated_deps,
+                "summary": updated_summary,
+            })
+            self.analysis_service.save_capsule(capsule)
+            logger.info("Updated capsule deliverable with %d verification check results", len(all_results))
+        except Exception as cap_exc:
+            logger.warning("Could not sync verification results to capsule: %s", cap_exc)
+
         # Update analysis stage safely
         analysis = self.analysis_service.get_analysis(analysis_id)
         if analysis.status in (AnalysisStatus.READY_FOR_VERIFICATION, AnalysisStatus.VERIFYING):

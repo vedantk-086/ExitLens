@@ -40,8 +40,8 @@ class GoogleAiStudioProvider(BaseAiProvider):
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.settings = settings or get_settings()
         self.model_name = self.settings.GOOGLE_AI_MODEL
-        self.timeout_seconds = max(self.settings.GOOGLE_AI_TIMEOUT_SECONDS, 90)
-        self.max_retries = min(getattr(self.settings, "GOOGLE_AI_MAX_RETRIES", 1), 1)
+        self.timeout_seconds = getattr(self.settings, "GOOGLE_AI_TIMEOUT_SECONDS", 15) or 15
+        self.max_retries = getattr(self.settings, "GOOGLE_AI_MAX_RETRIES", 0) or 0
         self._client = None
 
     @property
@@ -68,7 +68,6 @@ class GoogleAiStudioProvider(BaseAiProvider):
 
         client = self._get_client()
         config = types.GenerateContentConfig(
-            response_mime_type="application/json",
             temperature=0.2,
         )
 
@@ -291,46 +290,68 @@ class GoogleAiStudioProvider(BaseAiProvider):
             status = CandidateStatus.PROPOSED.value
             rationale = "Python 3.12 includes standard library 'tomllib' for high-performance read-only TOML parsing, eliminating the external dependency."
             steps = [
-                MigrationStep(step_number=1, action="Verify read-only usage", description="Confirm 'toml' is only used to read/parse TOML files, not write.", target_file=dependency.manifest_path),
-                MigrationStep(step_number=2, action="Replace imports", description="Replace 'import toml' with 'import tomllib' and update load() calls.", target_file=usages[0].path if usages else None),
-                MigrationStep(step_number=3, action="Remove from manifest", description=f"Remove '{dependency.distribution_name}' from {dependency.manifest_path}.", target_file=dependency.manifest_path),
+                MigrationStep(step_number=1, action="Verify read-only usage", description="Confirm 'toml' is only used to read/parse TOML files, not write.", target_file=dependency.manifest_path, code_example="# Check usages: only toml.load/loads\nimport tomllib"),
+                MigrationStep(step_number=2, action="Replace imports", description="Replace 'import toml' with 'import tomllib' and update load() calls.", target_file=usages[0].path if usages else None, code_example="import tomllib\nwith open('config.toml', 'rb') as f:\n    data = tomllib.load(f)"),
+                MigrationStep(step_number=3, action="Remove from manifest", description=f"Remove '{dependency.distribution_name}' from {dependency.manifest_path}.", target_file=dependency.manifest_path, code_example=f"# Remove line: {dependency.distribution_name} from {dependency.manifest_path}"),
             ]
-            tests = [SuggestedTest(test_id="check-tomllib", objective="Ensure configuration files parse correctly with tomllib", relation_to_usage="TOML parsing", suggested_profile="pytest", preconditions=[], expected_signal="Config loaded without error")]
+            tests = [SuggestedTest(test_id="check-tomllib", objective="Ensure configuration files parse correctly with tomllib", description="Ensure configuration files parse correctly with tomllib", relation_to_usage="TOML parsing", suggested_profile="pytest-default", test_type="pytest", preconditions=[], expected_signal="Config loaded without error", code_example="def test_tomllib_parse():\n    import tomllib\n    with open('pyproject.toml', 'rb') as f:\n        assert tomllib.load(f)")]
+            diffs = ["tomllib requires binary read mode ('rb') instead of text mode ('r')"]
+            gaps = ["tomllib does not support writing/dumping TOML files; use tomli-w if writing is required."]
+            concerns.append("Ensure codebase only reads TOML; write operations require tomli_w.")
         elif name == "appdirs":
             candidate = "platformdirs"
             specifier = ">=4.0.0"
             status = CandidateStatus.PROPOSED.value
-            rationale = "Package 'appdirs' is unmaintained. 'platformdirs' is the community-standard drop-in successor."
+            rationale = "Package 'appdirs' is unmaintained. 'platformdirs' is the community-standard drop-in successor with modern OS path support."
             steps = [
-                MigrationStep(step_number=1, action="Update manifest", description="Replace 'appdirs' with 'platformdirs>=4.0.0'.", target_file=dependency.manifest_path),
-                MigrationStep(step_number=2, action="Update imports", description="Replace 'import appdirs' with 'import platformdirs'.", target_file=usages[0].path if usages else None),
+                MigrationStep(step_number=1, action="Update manifest", description="Replace 'appdirs' with 'platformdirs>=4.0.0'.", target_file=dependency.manifest_path, code_example="platformdirs>=4.0.0"),
+                MigrationStep(step_number=2, action="Update imports", description="Replace 'import appdirs' with 'import platformdirs'.", target_file=usages[0].path if usages else None, code_example="from platformdirs import user_data_dir, user_cache_dir"),
             ]
-            tests = [SuggestedTest(test_id="check-platformdirs", objective="Verify platform cache/data directories resolve correctly", relation_to_usage="Cache directory access", suggested_profile="pytest", preconditions=[], expected_signal="Returns valid path")]
+            tests = [SuggestedTest(test_id="check-platformdirs", objective="Verify platform cache/data directories resolve correctly", description="Verify platform cache/data directories resolve correctly", relation_to_usage="Cache directory access", suggested_profile="pytest-default", test_type="pytest", preconditions=[], expected_signal="Returns valid path", code_example="def test_dirs():\n    from platformdirs import user_data_dir\n    assert user_data_dir('app')")]
+            diffs = ["platformdirs provides dedicated functions for macOS and Windows paths with improved sandbox handling."]
+            gaps = ["Default directory hierarchy may vary slightly on older Linux distributions."]
+            concerns.append("Validate data migration if existing files were stored under legacy appdirs directories.")
         elif name == "nose":
             candidate = "pytest"
             specifier = ">=7.0.0"
             status = CandidateStatus.PROPOSED.value
             rationale = "Package 'nose' is deprecated and unmaintained. 'pytest' is the modern standard Python test framework."
             steps = [
-                MigrationStep(step_number=1, action="Update dev dependencies", description="Replace 'nose' with 'pytest>=7.0.0'.", target_file=dependency.manifest_path),
-                MigrationStep(step_number=2, action="Run pytest", description="Execute pytest test discovery to verify test discovery and execution.", target_file=None),
+                MigrationStep(step_number=1, action="Update dev dependencies", description="Replace 'nose' with 'pytest>=7.0.0'.", target_file=dependency.manifest_path, code_example="pytest>=7.0.0"),
+                MigrationStep(step_number=2, action="Run pytest", description="Execute pytest test discovery to verify test discovery and execution.", target_file=None, code_example="pytest tests/"),
             ]
-            tests = [SuggestedTest(test_id="check-pytest", objective="Confirm all tests run under pytest", relation_to_usage="Test suite runner", suggested_profile="pytest", preconditions=[], expected_signal="All tests pass")]
-        elif any(r.rule_id == "UNPINNED_OR_WIDE_CONSTRAINT" for r in risks):
-            candidate = dependency.distribution_name
-            specifier = ">=1.0.0,<2.0.0"
-            status = CandidateStatus.PROPOSED.value
-            rationale = f"Dependency '{dependency.distribution_name}' has an unpinned or overly wide constraint. Restrict to a bounded version range to prevent upstream breaking changes."
-            steps = [
-                MigrationStep(step_number=1, action="Pin constraint", description=f"Update '{dependency.distribution_name}' in {dependency.manifest_path} to specify a safe upper bound.", target_file=dependency.manifest_path)
-            ]
-            tests = [SuggestedTest(test_id="check-pin", objective=f"Verify {dependency.distribution_name} operates with pinned version", relation_to_usage="Runtime usage", suggested_profile="pytest", preconditions=[], expected_signal="Pass")]
+            tests = [SuggestedTest(test_id="check-pytest", objective="Confirm all tests run under pytest", description="Confirm all tests run under pytest", relation_to_usage="Test suite runner", suggested_profile="pytest-default", test_type="pytest", preconditions=[], expected_signal="All tests pass", code_example="pytest -v")]
+            diffs = ["Nose test generators and with_setup decorators must be migrated to pytest fixtures."]
+            gaps = ["Custom nose plugins are not compatible with pytest without adapters."]
+            concerns.append("Review test setup methods: replace nose setup() with pytest fixtures.")
         else:
-            candidate = None
-            specifier = None
-            status = CandidateStatus.NO_CANDIDATE_IDENTIFIED.value
-            rationale = f"No specific migration replacement candidate identified for '{dependency.distribution_name}'. Review risk indicators and verify runtime usage."
-            concerns.append("Static analysis found review indicators; manual inspection recommended.")
+            # Concrete bounded recommendation for unpinned or other flagged packages
+            candidate = dependency.distribution_name
+            target_ver = dependency.resolved_version or ">=1.0.0,<2.0.0"
+            if not target_ver.startswith((">=", "==", "~=")):
+                specifier = f">={target_ver},<{int(target_ver.split('.')[0]) + 1}.0.0" if target_ver[0].isdigit() else ">=1.0.0,<2.0.0"
+            else:
+                specifier = target_ver
+            status = CandidateStatus.PROPOSED.value
+            rationale = f"Enforce bounded semantic version constraint for '{dependency.distribution_name}' ({specifier}) to insulate against upstream breaking changes and supply chain shifts."
+            steps = [
+                MigrationStep(step_number=1, action="Pin manifest specifier", description=f"Update '{dependency.distribution_name}' in {dependency.manifest_path} to '{dependency.distribution_name}{specifier}'.", target_file=dependency.manifest_path, code_example=f"# In {dependency.manifest_path}\n{dependency.distribution_name}{specifier}"),
+                MigrationStep(step_number=2, action="Verify package installation", description=f"Lock and test '{dependency.distribution_name}' in a clean virtual environment.", target_file=None, code_example=f"pip install '{dependency.distribution_name}{specifier}'\npytest"),
+            ]
+            tests = [SuggestedTest(
+                test_id=f"verify-{name}",
+                objective=f"Verify {dependency.distribution_name} import and functionality under pinned version",
+                description=f"Verify {dependency.distribution_name} functionality under pinned version",
+                relation_to_usage="Runtime usage check",
+                suggested_profile="pytest-default",
+                test_type="pytest",
+                preconditions=[],
+                expected_signal="Module imports and test suite passes without deprecation warnings",
+                code_example=f"def test_{name.replace('-', '_')}_import():\n    import {name.split('-')[0]}\n    assert True",
+            )]
+            diffs = [f"Tightened version constraint from '{dependency.declared_specifier or 'unpinned'}' to '{specifier}'"]
+            gaps = [f"Requires review when upgrading beyond major version boundaries of {dependency.distribution_name}"]
+            concerns.append(f"Ensure CI builds verify lockfile synchronization for {dependency.distribution_name}.")
 
         return RecommendationRecord(
             dependency_id=dependency_id,

@@ -18,6 +18,7 @@ vi.mock('../src/api/analyses', () => ({
   postVerification: vi.fn(),
   createAnalysis: vi.fn(),
   getAnalysis: vi.fn(),
+  getTestProfiles: vi.fn().mockResolvedValue([]),
 }));
 
 import * as analysesApi from '../src/api/analyses';

@@ -743,14 +743,14 @@ export function CapsulePage() {
                           {risk.severity}
                         </StatusBadge>
                       </div>
-                      {risk.evidence_ids && risk.evidence_ids.length > 0 && (
+                      {((risk.evidence_ids && risk.evidence_ids.length > 0) || (risk.evidence_refs && risk.evidence_refs.length > 0)) && (
                         <span className="font-mono text-[10px] text-[#718096]">
-                          ev: {risk.evidence_ids.join(', ')}
+                          ev: {(risk.evidence_ids || risk.evidence_refs || []).join(', ')}
                         </span>
                       )}
                     </div>
-                    <p className="font-medium text-[#172033]">{risk.signal}</p>
-                    <p className="text-[#526176] leading-relaxed">{risk.explanation}</p>
+                    <p className="font-medium text-[#172033]">{risk.signal || risk.title || 'Risk indicator identified'}</p>
+                    <p className="text-[#526176] leading-relaxed">{risk.explanation || risk.signal || risk.title}</p>
                     {risk.limitations && (
                       <p className="text-[11px] text-[#925C08] italic">
                         Limitation: {risk.limitations}
@@ -783,9 +783,9 @@ export function CapsulePage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 font-semibold text-[#172033]">
                         <FileCode className="w-3.5 h-3.5 text-[#315BE8]" />
-                        <span>{loc.file_path}</span>
+                        <span>{loc.file_path || loc.path || 'Source file'}</span>
                         <span className="text-[#718096] font-normal">
-                          :L{loc.line_start}
+                          :L{loc.line_start ?? 1}
                           {loc.line_end ? `-${loc.line_end}` : ''}
                         </span>
                       </div>
@@ -795,12 +795,12 @@ export function CapsulePage() {
                         </StatusBadge>
                       )}
                     </div>
-                    {loc.import_name && (
-                      <span className="text-[#526176]">import: {loc.import_name}</span>
+                    {(loc.import_name || loc.import_statement) && (
+                      <span className="text-[#526176]">import: {loc.import_name || loc.import_statement}</span>
                     )}
-                    {loc.excerpt && (
+                    {(loc.excerpt || loc.pattern) && (
                       <pre className="text-[10px] bg-white border border-[#E1E6EE] p-1.5 rounded overflow-x-auto text-[#172033] whitespace-pre-wrap">
-                        {loc.excerpt}
+                        {loc.excerpt || loc.pattern}
                       </pre>
                     )}
                   </div>
@@ -824,11 +824,15 @@ export function CapsulePage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-[#172033] text-sm">
-                      {activeRecord.proposed_replacement.candidate_distribution || 'No specific package'}
+                      {activeRecord.proposed_replacement.candidate_distribution ||
+                        activeRecord.proposed_replacement.distribution_name ||
+                        'No specific package'}
                     </span>
-                    {activeRecord.proposed_replacement.candidate_specifier && (
+                    {(activeRecord.proposed_replacement.candidate_specifier ||
+                      activeRecord.proposed_replacement.specifier) && (
                       <span className="font-mono text-xs text-[#526176]">
-                        {activeRecord.proposed_replacement.candidate_specifier}
+                        {activeRecord.proposed_replacement.candidate_specifier ||
+                          activeRecord.proposed_replacement.specifier}
                       </span>
                     )}
                   </div>
@@ -872,7 +876,7 @@ export function CapsulePage() {
                       <span className="w-5 h-5 rounded-full bg-[#315BE8] text-white flex items-center justify-center font-bold text-[10px]">
                         {step.step_number || idx + 1}
                       </span>
-                      <span className="font-medium text-[#172033]">{step.description}</span>
+                      <span className="font-medium text-[#172033]">{step.description || step.action}</span>
                     </div>
                     {step.code_example && (
                       <pre className="text-[11px] font-mono bg-[#172033] text-[#E2E8F0] p-2.5 rounded overflow-x-auto whitespace-pre-wrap">
@@ -904,16 +908,16 @@ export function CapsulePage() {
                     className="p-3 bg-[#FAFBFC] border border-[#E1E6EE] rounded-md flex flex-col gap-1.5"
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-medium text-[#172033]">{test.description}</span>
-                      {test.test_type && (
+                      <span className="font-medium text-[#172033]">{test.description || test.objective || test.test_id}</span>
+                      {(test.test_type || test.suggested_profile) && (
                         <StatusBadge variant="neutral" size="sm">
-                          {test.test_type}
+                          {test.test_type || test.suggested_profile}
                         </StatusBadge>
                       )}
                     </div>
-                    {test.code_example && (
+                    {(test.code_example || test.expected_signal) && (
                       <pre className="text-[11px] font-mono bg-[#172033] text-[#E2E8F0] p-2 rounded overflow-x-auto whitespace-pre-wrap">
-                        {test.code_example}
+                        {test.code_example || `Expected signal: ${test.expected_signal}`}
                       </pre>
                     )}
                   </div>
@@ -1031,7 +1035,9 @@ export function CapsulePage() {
                   >
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-[#925C08] shrink-0 mt-0.5" />
-                      <span className="text-[#172033] leading-relaxed">{gap.description}</span>
+                      <span className="text-[#172033] leading-relaxed">
+                        {gap.description || gap.title || (typeof gap === 'string' ? gap : 'Discrepancy noted')}
+                      </span>
                     </div>
                     {gap.severity && (
                       <StatusBadge variant={severityVariant(gap.severity)} size="sm">
@@ -1064,7 +1070,9 @@ export function CapsulePage() {
                   >
                     <div className="flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-[#526176] shrink-0 mt-0.5" />
-                      <span className="text-[#172033] leading-relaxed">{concern.description}</span>
+                      <span className="text-[#172033] leading-relaxed">
+                        {concern.description || (typeof concern === 'string' ? concern : 'Limitation noted')}
+                      </span>
                     </div>
                     {concern.category && (
                       <span className="text-[10px] font-mono bg-[#E1E6EE] px-1.5 py-0.5 rounded text-[#526176]">

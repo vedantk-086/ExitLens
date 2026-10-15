@@ -14,7 +14,10 @@ export type DependencyListState =
   | { status: 'loaded'; items: DependencyListItem[]; warnings: string[] }
   | { status: 'error'; error: string; code: string };
 
-export function useDependencyList(analysisId: string | null) {
+export function useDependencyList(
+  analysisId: string | null,
+  statusTrigger?: string | number | null
+) {
   const [state, setState] = useState<DependencyListState>({ status: 'idle' });
 
   const load = useCallback(async (id: string) => {
@@ -41,7 +44,7 @@ export function useDependencyList(analysisId: string | null) {
     } else {
       setState({ status: 'idle' });
     }
-  }, [analysisId, load]);
+  }, [analysisId, statusTrigger, load]);
 
   const refresh = useCallback(() => {
     if (analysisId) load(analysisId);

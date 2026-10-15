@@ -68,10 +68,28 @@ export function LandingPage() {
   const [downloadingMd, setDownloadingMd] = useState(false);
 
   // Query dependency list for active analysis
-  const { state: depListState } = useDependencyList(activeAnalysis?.analysis_id ?? null);
+  const { state: depListState, refresh: refreshDeps } = useDependencyList(
+    activeAnalysis?.analysis_id ?? null,
+    `${activeAnalysis?.status}-${activeAnalysis?.stage}`
+  );
   const dependencies: DependencyListItem[] = depListState.status === 'loaded' ? depListState.items : [];
   const totalCount = dependencies.length;
   const isDepsLoading = depListState.status === 'loading';
+
+  // Automatically refresh dependencies if analysis is completed but dependencies list was loaded empty
+  useEffect(() => {
+    if (
+      activeAnalysis?.analysis_id &&
+      (activeAnalysis.status === 'completed' || activeAnalysis.status === 'completed_with_warnings') &&
+      depListState.status === 'loaded' &&
+      dependencies.length === 0
+    ) {
+      const timer = setTimeout(() => {
+        refreshDeps();
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [activeAnalysis?.status, activeAnalysis?.analysis_id, depListState.status, dependencies.length, refreshDeps]);
 
   // Query dependency detail for drawer
   const detailState = useDependencyDetail(activeAnalysis?.analysis_id ?? null, selectedDepId);
@@ -263,14 +281,15 @@ export function LandingPage() {
     if (depSearch && !dep.name.toLowerCase().includes(depSearch.toLowerCase())) {
       return false;
     }
+    const sev = String(dep.highest_severity || 'info').toLowerCase();
     if (depSeverityFilter === 'high') {
-      return dep.highest_severity === 'critical' || dep.highest_severity === 'high';
+      return sev === 'critical' || sev === 'high';
     }
     if (depSeverityFilter === 'medium') {
-      return dep.highest_severity === 'medium';
+      return sev === 'medium';
     }
     if (depSeverityFilter === 'low') {
-      return dep.highest_severity === 'low' || dep.highest_severity === 'info';
+      return sev === 'low' || sev === 'info';
     }
     return true;
   });
@@ -1181,62 +1200,87 @@ export function LandingPage() {
                   <Loader2 className="w-6 h-6 animate-spin text-[#315BE8]" />
                   <span>Loading dependency inventory from backend...</span>
                 </div>
+              ) : isPolling || (activeAnalysis?.status !== 'completed' && activeAnalysis?.status !== 'completed_with_warnings' && activeAnalysis?.status !== 'failed' && totalCount === 0) ? (
+                <div className="p-12 flex flex-col items-center justify-center gap-3 text-xs text-[#718096]">
+                  <Loader2 className="w-6 h-6 animate-spin text-[#315BE8]" />
+                  <span>
+                    Scanning repository and generating dependency evidence... (
+                    {activeAnalysis?.progress?.stage || activeAnalysis?.stage || 'analyzing'})
+                  </span>
+                </div>
+              ) : totalCount === 0 ? (
+                <div className="p-12 text-center text-xs text-[#718096]">
+                  No flagged dependencies requiring exit or migration review were identified in this repository.
+                </div>
               ) : filteredDependencies.length === 0 ? (
                 <div className="p-12 text-center text-xs text-[#718096]">
-                  No dependencies match your current filter.
+                  No dependencies match your current filter &ldquo;{depSeverityFilter}&rdquo;{depSearch ? ` and search &ldquo;${depSearch}&rdquo;` : ''}.
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDepSeverityFilter('all');
+                      setDepSearch('');
+                    }}
+                    className="ml-2 text-[#315BE8] underline font-medium hover:text-[#2547b8] cursor-pointer"
+                  >
+                    Reset filters
+                  </button>
                 </div>
               ) : (
                 <div className="divide-y divide-[#E1E6EE]">
-                  {filteredDependencies.slice(0, 8).map((dep: DependencyListItem) => (
-                    <div
-                      key={dep.dependency_id}
-                      className="p-4 hover:bg-[#FAFBFC] transition-colors flex items-center justify-between gap-4 text-xs"
-                    >
-                      <div className="flex flex-col gap-1 min-w-[200px]">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-[#172033]">
-                            {dep.name}
-                          </span>
-                          <span className="font-mono text-[11px] text-[#718096]">
-                            {dep.declared_version || dep.resolved_version || 'unpinned'}
+                  {filteredDependencies.slice(0, 8).map((dep: DependencyListItem) => {
+                    const sev = String(dep.highest_severity || 'info').toLowerCase();
+                    return (
+                      <div
+                        key={dep.dependency_id}
+                        className="p-4 hover:bg-[#FAFBFC] transition-colors flex items-center justify-between gap-4 text-xs"
+                      >
+                        <div className="flex flex-col gap-1 min-w-[200px]">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-[#172033]">
+                              {dep.name}
+                            </span>
+                            <span className="font-mono text-[11px] text-[#718096]">
+                              {dep.declared_version || dep.resolved_version || 'unpinned'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono text-[#526176] truncate max-w-xs">
+                            {dep.manifest_path}
                           </span>
                         </div>
-                        <span className="text-[11px] font-mono text-[#526176] truncate max-w-xs">
-                          {dep.manifest_path}
-                        </span>
+
+                        <div className="flex items-center gap-3">
+                          <StatusBadge
+                            variant={
+                              sev === 'critical' || sev === 'high'
+                                ? 'failure'
+                                : sev === 'medium'
+                                ? 'warning'
+                                : 'info'
+                            }
+                            size="sm"
+                          >
+                            {sev}
+                          </StatusBadge>
+
+                          <span className="text-[11px] text-[#718096]">
+                            {dep.usage_count} call-sites
+                          </span>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedDepId(dep.dependency_id);
+                              setDrawerOpen(true);
+                            }}
+                          >
+                            Inspect Evidence
+                          </Button>
+                        </div>
                       </div>
-
-                      <div className="flex items-center gap-3">
-                        <StatusBadge
-                          variant={
-                            dep.highest_severity === 'critical' || dep.highest_severity === 'high'
-                              ? 'failure'
-                              : dep.highest_severity === 'medium'
-                              ? 'warning'
-                              : 'info'
-                          }
-                          size="sm"
-                        >
-                          {dep.highest_severity || 'info'}
-                        </StatusBadge>
-
-                        <span className="text-[11px] text-[#718096]">
-                          {dep.usage_count} call-sites
-                        </span>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedDepId(dep.dependency_id);
-                            setDrawerOpen(true);
-                          }}
-                        >
-                          Inspect Evidence
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

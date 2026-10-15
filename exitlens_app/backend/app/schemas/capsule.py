@@ -25,13 +25,17 @@ class UsageLocation(BaseModel):
 
     usage_id: str = Field(..., description="Stable usage reference identifier")
     path: str = Field(..., description="Repository-relative file path")
+    file_path: Optional[str] = Field(default=None, description="Alias for path")
     line_start: Optional[int] = Field(default=None, description="Starting line reference")
     line_end: Optional[int] = Field(default=None, description="Ending line reference")
     import_statement: Optional[str] = Field(default=None, description="Discovered import snippet")
+    import_name: Optional[str] = Field(default=None, description="Import name or statement")
     symbol: Optional[str] = Field(default=None, description="Specific imported symbol or class")
     pattern: Optional[str] = Field(default=None, description="Usage pattern or call expression")
+    excerpt: Optional[str] = Field(default=None, description="Excerpt snippet")
     evidence_id: str = Field(..., description="Linked evidence ID")
     note: Optional[str] = Field(default=None, description="Uncertainty or scoping explanation")
+    is_test_file: Optional[bool] = Field(default=False, description="Whether usage occurs in test file")
 
 
 class CompatibilityGap(BaseModel):
@@ -41,7 +45,9 @@ class CompatibilityGap(BaseModel):
     gap_id: str = Field(..., description="Stable gap identifier")
     title: str = Field(..., description="Short gap summary")
     description: str = Field(..., description="Detailed explanation of the discrepancy")
+    severity: Optional[str] = Field(default=None, description="Severity of compatibility gap")
     evidence_refs: List[str] = Field(default_factory=list, description="Supporting evidence IDs")
+    evidence_ids: List[str] = Field(default_factory=list, description="Alias for evidence_refs")
     verified: bool = Field(default=False, description="True if proven via execution result")
 
 
@@ -50,13 +56,16 @@ class DependencyDetails(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     distribution_name: str = Field(..., description="PyPI package distribution name")
+    name: Optional[str] = Field(default=None, description="Package name alias")
     manifest_path: str = Field(..., description="Repository-relative manifest path")
     declared_specifier: str = Field(..., description="Declared version constraint")
+    declared_version: Optional[str] = Field(default=None, description="Declared version alias")
     resolved_version: Optional[str] = Field(default=None, description="Locked/resolved version if available")
     package_manager: str = Field(default="pip", description="Manifest format: pip, poetry, uv, pipfile")
     dependency_type: str = Field(default="direct", description="'direct', 'transitive', or 'unknown'")
     runtime_markers: Optional[str] = Field(default=None, description="PEP 508 environment markers")
     metadata_availability: str = Field(default="available", description="Metadata retrieval status")
+    summary: Optional[str] = Field(default=None, description="Short summary of package purpose")
 
 
 class CapsuleDependencyRecord(BaseModel):
@@ -64,6 +73,7 @@ class CapsuleDependencyRecord(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     dependency_id: str = Field(..., description="Unique dependency identifier, e.g. dep-001")
+    name: Optional[str] = Field(default=None, description="Package name alias")
 
     # The 9 mandatory sections:
     dependency_details: DependencyDetails

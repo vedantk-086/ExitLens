@@ -107,6 +107,11 @@ export interface AnalysisStatusResponse {
   created_at: string;
   updated_at?: string;
   summary?: AnalysisSummary;
+  progress?: {
+    stage?: string;
+    percent?: number;
+    message?: string;
+  };
   warnings?: string[];
   errors?: string[];
   artifacts?: AnalysisArtifacts;
@@ -128,6 +133,23 @@ export interface HealthResponse {
   python_version?: string;
   storage_ready?: boolean;
   model?: ModelHealth;
+
+  // Real backend schema fields
+  timestamp_utc?: string;
+  api?: { status: string; version: string; environment: string };
+  python?: { version: string; is_compatible: boolean; details?: string };
+  ai?: { provider: string; configured_model: string; available: boolean; details?: string };
+  storage?: { ready: boolean; writable: boolean; details?: string };
+}
+
+export interface TestProfile {
+  profile_id: string;
+  framework: string;
+  display_name: string;
+  description: string;
+  server_argv?: string[];
+  is_detected?: boolean;
+  detection_reason?: string;
 }
 
 // ─── Error ──────────────────────────────────────────────────────────────────
@@ -164,7 +186,9 @@ export interface RiskIndicator {
   severity: RiskSeverity;
   signal: string;
   explanation: string;
+  title?: string;
   evidence_ids?: string[];
+  evidence_refs?: string[];
   limitations?: string;
 }
 
@@ -172,9 +196,12 @@ export interface RiskIndicator {
 
 export interface UsageLocation {
   file_path: string;
+  path?: string;
   line_start: number;
   line_end?: number;
   import_name?: string;
+  import_statement?: string;
+  pattern?: string;
   excerpt?: string;
   provenance?: EvidenceProvenance;
   evidence_id?: string;
@@ -209,7 +236,9 @@ export interface DependencyListResponse {
 export interface ProposedReplacement {
   status: string;
   candidate_distribution?: string | null;
+  distribution_name?: string | null;
   candidate_specifier?: string | null;
+  specifier?: string | null;
   rationale?: string | null;
   provenance?: EvidenceProvenance;
   evidence_ids?: string[];
@@ -219,12 +248,17 @@ export interface ProposedReplacement {
 export interface MigrationStep {
   step_number: number;
   description: string;
+  action?: string;
   code_example?: string | null;
   provenance?: EvidenceProvenance;
 }
 
 export interface SuggestedTest {
   description: string;
+  objective?: string;
+  test_id?: string;
+  suggested_profile?: string;
+  expected_signal?: string;
   test_type?: string;
   code_example?: string | null;
   provenance?: EvidenceProvenance;
@@ -249,6 +283,7 @@ export interface ExecutedTestResult {
 }
 
 export interface CompatibilityGap {
+  title?: string;
   description: string;
   severity?: RiskSeverity;
   provenance?: EvidenceProvenance;
