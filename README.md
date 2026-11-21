@@ -1,8 +1,7 @@
 # ExitLens — Evidence-Linked Dependency Migration Intelligence
 
 > **Track:** Gemma 4 — Dependency Resilience  
-> **Target repository:** [`rishrek/LinkWatch`](https://github.com/rishrek/LinkWatch)  
-> **Submission repository name:** `H26_<TeamName>_ExitLens`  
+> **Target repository:** [`rishrek/LinkWatch`](https://github.com/rishrek/LinkWatch)    
 > **Status:** Implementation blueprint for the hackathon MVP. A feature is considered complete only after its code and tests exist; this README is the contract, not evidence that the implementation has already been built.
 
 > **Starter archive note:** this ZIP contains the ExitLens project scaffold and requirements, not the original LinkWatch Git history or upstream source files. Run `powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1` from the extracted folder. The script clones the official LinkWatch repository (or uses the existing checkout you pass), preserves its source and MIT license, saves its original README under `docs/upstream/`, and then overlays the ExitLens scaffold. It does not implement application logic.
